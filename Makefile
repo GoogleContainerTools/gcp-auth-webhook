@@ -9,6 +9,6 @@ image: build
 
 
 .PHONY: push
-push: image ## Push gcp-auth-webhook docker image using gcloud
-	gcloud docker -- push $(REGISTRY)/gcp-auth-webhook
+push: image
+	docker push $(REGISTRY)/gcp-auth-webhook
 

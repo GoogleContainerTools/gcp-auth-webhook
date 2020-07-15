@@ -88,7 +88,7 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		VolumeSource: corev1.VolumeSource{
 			HostPath: func() *corev1.HostPathVolumeSource {
 				h := corev1.HostPathVolumeSource{
-					Path: "/tmp/google_application_credentials.json",
+					Path: "/var/lib/minikube/google_application_credentials.json",
 					Type: func() *corev1.HostPathType {
 						hpt := corev1.HostPathFile
 						return &hpt
@@ -114,8 +114,8 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
 	var e2 corev1.EnvVar
-	if _, err := os.Stat("/tmp/google_cloud_project"); err == nil {
-		project, err := ioutil.ReadFile("/tmp/google_cloud_project")
+	if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
+		project, err := ioutil.ReadFile("/var/lib/minikube/google_cloud_project")
 		if err == nil {
 			e2 = corev1.EnvVar{
 				Name:  "GOOGLE_CLOUD_PROJECT",
@@ -208,7 +208,7 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	log.Print("Mutate webhook server started! Take 5.")
+	log.Print("GCP Auth Webhook started!")
 
 	mux := http.NewServeMux()
 
