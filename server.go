@@ -35,6 +35,14 @@ var (
 	deserializer  = codecs.UniversalDeserializer()
 )
 
+var projectAliases = []string{
+	"PROJECT_ID",
+	"GCP_PROJECT",
+	"GCLOUD_PROJECT",
+	"GOOGLE_CLOUD_PROJECT",
+	"CLOUDSDK_CORE_PROJECT",
+}
+
 type patchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
@@ -111,22 +119,20 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		Name:  "GOOGLE_APPLICATION_CREDENTIALS",
 		Value: "/google-app-creds.json",
 	}
+	envVars := []corev1.EnvVar{e}
 
 	// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
-	var e2 corev1.EnvVar
 	if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
 		project, err := ioutil.ReadFile("/var/lib/minikube/google_cloud_project")
 		if err == nil {
-			e2 = corev1.EnvVar{
-				Name:  "GOOGLE_CLOUD_PROJECT",
-				Value: string(project),
+			// Set the project name for every variant of the project env var
+			for _, a := range projectAliases {
+				envVars = append(envVars, corev1.EnvVar{
+					Name:  a,
+					Value: string(project),
+				})
 			}
 		}
-	}
-
-	envVars := []corev1.EnvVar{e}
-	if e2.Name != "" {
-		envVars = append(envVars, e2)
 	}
 
 	patch = append(patch, patchOperation{
