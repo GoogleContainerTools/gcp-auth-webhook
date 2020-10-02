@@ -1,5 +1,5 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.0.3-snapshot
+VERSION=v0.0.3
 
 build:
 	CGO_ENABLED=0 GOOS=linux go build -o out/gcp-auth-webhook -ldflags=$(PROVISIONER_LDFLAGS) server.go
