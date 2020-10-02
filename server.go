@@ -90,83 +90,86 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 
 	var patch []patchOperation
 
-	// Define the volume to mount in
-	v := corev1.Volume{
-		Name: "gcp-creds",
-		VolumeSource: corev1.VolumeSource{
-			HostPath: func() *corev1.HostPathVolumeSource {
-				h := corev1.HostPathVolumeSource{
-					Path: "/var/lib/minikube/google_application_credentials.json",
-					Type: func() *corev1.HostPathType {
-						hpt := corev1.HostPathFile
-						return &hpt
-					}(),
+	// Explicitly and silently exclude the kube-system namespace
+	if pod.ObjectMeta.Namespace != metav1.NamespaceSystem {
+		// Define the volume to mount in
+		v := corev1.Volume{
+			Name: "gcp-creds",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: func() *corev1.HostPathVolumeSource {
+					h := corev1.HostPathVolumeSource{
+						Path: "/var/lib/minikube/google_application_credentials.json",
+						Type: func() *corev1.HostPathType {
+							hpt := corev1.HostPathFile
+							return &hpt
+						}(),
+					}
+					return &h
+				}(),
+			},
+		}
+
+		// Mount the volume in
+		mount := corev1.VolumeMount{
+			Name:      "gcp-creds",
+			MountPath: "/google-app-creds.json",
+			ReadOnly:  true,
+		}
+
+		// Define the env var
+		e := corev1.EnvVar{
+			Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+			Value: "/google-app-creds.json",
+		}
+		envVars := []corev1.EnvVar{e}
+
+		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
+		if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
+			project, err := ioutil.ReadFile("/var/lib/minikube/google_cloud_project")
+			if err == nil {
+				// Set the project name for every variant of the project env var
+				for _, a := range projectAliases {
+					envVars = append(envVars, corev1.EnvVar{
+						Name:  a,
+						Value: string(project),
+					})
 				}
-				return &h
-			}(),
-		},
-	}
-
-	// Mount the volume in
-	mount := corev1.VolumeMount{
-		Name:      "gcp-creds",
-		MountPath: "/google-app-creds.json",
-		ReadOnly:  true,
-	}
-
-	// Define the env var
-	e := corev1.EnvVar{
-		Name:  "GOOGLE_APPLICATION_CREDENTIALS",
-		Value: "/google-app-creds.json",
-	}
-	envVars := []corev1.EnvVar{e}
-
-	// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
-	if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
-		project, err := ioutil.ReadFile("/var/lib/minikube/google_cloud_project")
-		if err == nil {
-			// Set the project name for every variant of the project env var
-			for _, a := range projectAliases {
-				envVars = append(envVars, corev1.EnvVar{
-					Name:  a,
-					Value: string(project),
-				})
 			}
 		}
-	}
 
-	patch = append(patch, patchOperation{
-		Op:    "add",
-		Path:  "/spec/volumes",
-		Value: append(pod.Spec.Volumes, v),
-	})
+		patch = append(patch, patchOperation{
+			Op:    "add",
+			Path:  "/spec/volumes",
+			Value: append(pod.Spec.Volumes, v),
+		})
 
-	for i, c := range pod.Spec.Containers {
-		if len(c.VolumeMounts) == 0 {
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-				Value: []corev1.VolumeMount{mount},
-			})
-		} else {
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-				Value: append(c.VolumeMounts, mount),
-			})
-		}
-		if len(c.Env) == 0 {
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-				Value: envVars,
-			})
-		} else {
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-				Value: append(c.Env, envVars...),
-			})
+		for i, c := range pod.Spec.Containers {
+			if len(c.VolumeMounts) == 0 {
+				patch = append(patch, patchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+					Value: []corev1.VolumeMount{mount},
+				})
+			} else {
+				patch = append(patch, patchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+					Value: append(c.VolumeMounts, mount),
+				})
+			}
+			if len(c.Env) == 0 {
+				patch = append(patch, patchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+					Value: envVars,
+				})
+			} else {
+				patch = append(patch, patchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+					Value: append(c.Env, envVars...),
+				})
+			}
 		}
 	}
 
