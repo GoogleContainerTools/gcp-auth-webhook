@@ -13,5 +13,5 @@ image: build ## Create the multiarch manifest builder
 
 .PHONY: push
 push: image ## Push the manifest and images up to the registry
-	docker buildx build --platform linux/arm64,linux/amd64 -t $(REGISTRY)/gcp-auth-webhook:$(VERSION) --push -f Dockerfile ./out
+	env DOCKER_CLI_EXPERIMENTAL=enabled docker buildx build --platform linux/arm64,linux/amd64 -t $(REGISTRY)/gcp-auth-webhook:$(VERSION) --push -f Dockerfile ./out
 
