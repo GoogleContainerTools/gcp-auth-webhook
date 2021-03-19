@@ -49,6 +49,7 @@ type patchOperation struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
+// Mount in the volumes and add the appropriate env vars to new pods
 func mutateHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%v\n", r)
 
@@ -216,12 +217,112 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// Add image pull secret to new service accounts
+func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("%v\n", r)
+
+	var body []byte
+	if r.Body != nil {
+		if data, err := ioutil.ReadAll(r.Body); err == nil {
+			body = data
+		}
+	}
+
+	if len(body) == 0 {
+		log.Print("request body was empty, returning")
+		http.Error(w, "empty body", http.StatusBadRequest)
+		return
+	}
+
+	var admissionResponse *admissionv1.AdmissionResponse
+
+	ar := admissionv1.AdmissionReview{}
+	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
+		log.Printf("Can't decode body: %v", err)
+		admissionResponse = &admissionv1.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		}
+	}
+
+	req := ar.Request
+	var sa corev1.ServiceAccount
+	if err := json.Unmarshal(req.Object.Raw, &sa); err != nil {
+		log.Printf("Could not unmarshal raw object: %v", err)
+		admissionResponse = &admissionv1.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		}
+	}
+
+	var patch []patchOperation
+
+	ips := corev1.LocalObjectReference{Name: "gcp-auth"}
+	if len(sa.ImagePullSecrets) == 0 {
+		patch = []patchOperation{patchOperation{
+			Op:    "add",
+			Path:  "/imagePullSecrets",
+			Value: []corev1.LocalObjectReference{ips},
+		}}
+	} else {
+		patch = []patchOperation{patchOperation{
+			Op:    "add",
+			Path:  "/imagePullSecrets",
+			Value: append(sa.ImagePullSecrets, ips),
+		}}
+	}
+
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		admissionResponse = &admissionv1.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		}
+	}
+
+	if admissionResponse == nil {
+		admissionResponse = &admissionv1.AdmissionResponse{
+			Allowed: true,
+			Patch:   patchBytes,
+			PatchType: func() *admissionv1.PatchType {
+				pt := admissionv1.PatchTypeJSONPatch
+				return &pt
+			}(),
+		}
+	}
+
+	admissionReview := admissionv1.AdmissionReview{}
+	if admissionResponse != nil {
+		admissionReview.Response = admissionResponse
+		if ar.Request != nil {
+			admissionReview.Response.UID = ar.Request.UID
+		}
+	}
+	admissionReview.Kind = "AdmissionReview"
+	admissionReview.APIVersion = "admission.k8s.io/v1"
+
+	resp, err := json.Marshal(admissionReview)
+	if err != nil {
+		log.Printf("Can't encode response: %v", err)
+		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
+	}
+	log.Printf("Ready to write reponse ...")
+	if _, err := w.Write(resp); err != nil {
+		log.Printf("Can't write response: %v", err)
+		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
 func main() {
 	log.Print("GCP Auth Webhook started!")
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/mutate", mutateHandler)
+	mux.HandleFunc("/mutate/sa", serviceaccountHandler)
 
 	s := &http.Server{
 		Addr:    ":8443",
