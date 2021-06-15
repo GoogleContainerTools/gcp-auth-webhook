@@ -96,10 +96,8 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Explicitly and silently exclude the kube-system namespace
 	if pod.ObjectMeta.Namespace != metav1.NamespaceSystem {
-		var v corev1.Volume
-		var mount corev1.VolumeMount
 		// Define the volume to mount in
-		v = corev1.Volume{
+		v := corev1.Volume{
 			Name: "gcp-creds",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: func() *corev1.HostPathVolumeSource {
@@ -116,7 +114,7 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mount the volume in
-		mount = corev1.VolumeMount{
+		mount := corev1.VolumeMount{
 			Name:      "gcp-creds",
 			MountPath: "/google-app-creds.json",
 			ReadOnly:  true,
