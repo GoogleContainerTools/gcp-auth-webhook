@@ -90,11 +90,16 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var patch []patchOperation
+	var envVars []corev1.EnvVar
+
+	needsCreds := needsEnvVar(pod.Spec.Containers[0], "GOOGLE_APPLICATION_CREDENTIALS")
 
 	// Explicitly and silently exclude the kube-system namespace
 	if pod.ObjectMeta.Namespace != metav1.NamespaceSystem {
+		var v corev1.Volume
+		var mount corev1.VolumeMount
 		// Define the volume to mount in
-		v := corev1.Volume{
+		v = corev1.Volume{
 			Name: "gcp-creds",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: func() *corev1.HostPathVolumeSource {
@@ -111,18 +116,20 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Mount the volume in
-		mount := corev1.VolumeMount{
+		mount = corev1.VolumeMount{
 			Name:      "gcp-creds",
 			MountPath: "/google-app-creds.json",
 			ReadOnly:  true,
 		}
 
 		// Define the env var
-		e := corev1.EnvVar{
-			Name:  "GOOGLE_APPLICATION_CREDENTIALS",
-			Value: "/google-app-creds.json",
+		if needsCreds {
+			e := corev1.EnvVar{
+				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+				Value: "/google-app-creds.json",
+			}
+			envVars = append(envVars, e)
 		}
-		envVars := []corev1.EnvVar{e}
 
 		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
 		if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
@@ -130,46 +137,54 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				// Set the project name for every variant of the project env var
 				for _, a := range projectAliases {
-					envVars = append(envVars, corev1.EnvVar{
-						Name:  a,
-						Value: string(project),
-					})
+					if needsEnvVar(pod.Spec.Containers[0], a) {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  a,
+							Value: string(project),
+						})
+					}
 				}
 			}
 		}
 
-		patch = append(patch, patchOperation{
-			Op:    "add",
-			Path:  "/spec/volumes",
-			Value: append(pod.Spec.Volumes, v),
-		})
+		if needsCreds {
+			patch = append(patch, patchOperation{
+				Op:    "add",
+				Path:  "/spec/volumes",
+				Value: append(pod.Spec.Volumes, v),
+			})
+		}
 
-		for i, c := range pod.Spec.Containers {
-			if len(c.VolumeMounts) == 0 {
-				patch = append(patch, patchOperation{
-					Op:    "add",
-					Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-					Value: []corev1.VolumeMount{mount},
-				})
-			} else {
-				patch = append(patch, patchOperation{
-					Op:    "add",
-					Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-					Value: append(c.VolumeMounts, mount),
-				})
-			}
-			if len(c.Env) == 0 {
-				patch = append(patch, patchOperation{
-					Op:    "add",
-					Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-					Value: envVars,
-				})
-			} else {
-				patch = append(patch, patchOperation{
-					Op:    "add",
-					Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-					Value: append(c.Env, envVars...),
-				})
+		if len(envVars) > 0 {
+			for i, c := range pod.Spec.Containers {
+				if needsCreds {
+					if len(c.VolumeMounts) == 0 {
+						patch = append(patch, patchOperation{
+							Op:    "add",
+							Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+							Value: []corev1.VolumeMount{mount},
+						})
+					} else {
+						patch = append(patch, patchOperation{
+							Op:    "add",
+							Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+							Value: append(c.VolumeMounts, mount),
+						})
+					}
+				}
+				if len(c.Env) == 0 {
+					patch = append(patch, patchOperation{
+						Op:    "add",
+						Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+						Value: envVars,
+					})
+				} else {
+					patch = append(patch, patchOperation{
+						Op:    "add",
+						Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+						Value: append(c.Env, envVars...),
+					})
+				}
 			}
 		}
 	}
@@ -261,13 +276,13 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 
 	ips := corev1.LocalObjectReference{Name: "gcp-auth"}
 	if len(sa.ImagePullSecrets) == 0 {
-		patch = []patchOperation{patchOperation{
+		patch = []patchOperation{{
 			Op:    "add",
 			Path:  "/imagePullSecrets",
 			Value: []corev1.LocalObjectReference{ips},
 		}}
 	} else {
-		patch = []patchOperation{patchOperation{
+		patch = []patchOperation{{
 			Op:    "add",
 			Path:  "/imagePullSecrets",
 			Value: append(sa.ImagePullSecrets, ips),
@@ -314,6 +329,15 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Can't write response: %v", err)
 		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func needsEnvVar(c corev1.Container, name string) bool {
+	for _, e := range c.Env {
+		if e.Name == name {
+			return false
+		}
+	}
+	return true
 }
 
 func main() {
