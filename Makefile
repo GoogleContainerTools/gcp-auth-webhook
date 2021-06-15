@@ -1,5 +1,5 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.0.5
+VERSION=v0.0.6
 GOOS?=$(shell go env GOOS)
 
 build: ## Build the gcp-auth-webhook binary
