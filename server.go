@@ -120,13 +120,20 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 			ReadOnly:  true,
 		}
 
-		// Define the env var
 		if needsCreds {
+			// Define the env var
 			e := corev1.EnvVar{
 				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
 				Value: "/google-app-creds.json",
 			}
 			envVars = append(envVars, e)
+
+			// add the volume in the list of patches
+			patch = append(patch, patchOperation{
+				Op:    "add",
+				Path:  "/spec/volumes",
+				Value: append(pod.Spec.Volumes, v),
+			})
 		}
 
 		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
@@ -143,14 +150,6 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-		}
-
-		if needsCreds {
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  "/spec/volumes",
-				Value: append(pod.Spec.Volumes, v),
-			})
 		}
 
 		if len(envVars) > 0 {
