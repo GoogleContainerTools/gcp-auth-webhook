@@ -129,11 +129,20 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 			envVars = append(envVars, e)
 
 			// add the volume in the list of patches
-			patch = append(patch, patchOperation{
-				Op:    "add",
-				Path:  "/spec/volumes",
-				Value: append(pod.Spec.Volumes, v),
-			})
+			addVolume := true
+			for _, vl := range pod.Spec.Volumes {
+				if vl.Name == v.Name {
+					addVolume = false
+					break
+				}
+			}
+			if addVolume {
+				patch = append(patch, patchOperation{
+					Op:    "add",
+					Path:  "/spec/volumes",
+					Value: append(pod.Spec.Volumes, v),
+				})
+			}
 		}
 
 		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
@@ -162,11 +171,20 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 							Value: []corev1.VolumeMount{mount},
 						})
 					} else {
-						patch = append(patch, patchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-							Value: append(c.VolumeMounts, mount),
-						})
+						addMount := true
+						for _, vm := range c.VolumeMounts {
+							if vm.Name == mount.Name {
+								addMount = false
+								break
+							}
+						}
+						if addMount {
+							patch = append(patch, patchOperation{
+								Op:    "add",
+								Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+								Value: append(c.VolumeMounts, mount),
+							})
+						}
 					}
 				}
 				if len(c.Env) == 0 {
@@ -269,21 +287,32 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Make sure the gcp-auth secret exists before adding it as a pull secret
+	hasSecret := false
+	for _, s := range sa.Secrets {
+		if s.Name == "gcp-auth" {
+			hasSecret = true
+			break
+		}
+	}
+
 	var patch []patchOperation
 
-	ips := corev1.LocalObjectReference{Name: "gcp-auth"}
-	if len(sa.ImagePullSecrets) == 0 {
-		patch = []patchOperation{{
-			Op:    "add",
-			Path:  "/imagePullSecrets",
-			Value: []corev1.LocalObjectReference{ips},
-		}}
-	} else {
-		patch = []patchOperation{{
-			Op:    "add",
-			Path:  "/imagePullSecrets",
-			Value: append(sa.ImagePullSecrets, ips),
-		}}
+	if hasSecret {
+		ips := corev1.LocalObjectReference{Name: "gcp-auth"}
+		if len(sa.ImagePullSecrets) == 0 {
+			patch = []patchOperation{{
+				Op:    "add",
+				Path:  "/imagePullSecrets",
+				Value: []corev1.LocalObjectReference{ips},
+			}}
+		} else {
+			patch = []patchOperation{{
+				Op:    "add",
+				Path:  "/imagePullSecrets",
+				Value: append(sa.ImagePullSecrets, ips),
+			}}
+		}
 	}
 
 	patchBytes, err := json.Marshal(patch)
