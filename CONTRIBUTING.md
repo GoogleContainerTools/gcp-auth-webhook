@@ -3,6 +3,18 @@
 We'd love to accept your patches and contributions to this project. There are
 just a few small guidelines you need to follow.
 
+## Getting Started
+
+Create a fork of `gcp-auth-webhook`, and for best practices run:
+
+```bash
+git clone https://github.com/<YOUR_GITHUB_USERNAME>/gcp-auth-webhook.git
+cd gcp-auth-webhook
+git remote rename origin upstream
+git remote set-url --push upstream NO_PUSH
+git remote set-url upstream https://github.com/GoogleContainerTools/gcp-auth-webhook
+```
+
 ## Contributor License Agreement
 
 Contributions to this project must be accompanied by a Contributor License
