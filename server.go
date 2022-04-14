@@ -25,9 +25,12 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
+
+const gcpAuth = "gcp-auth"
 
 var (
 	runtimeScheme = runtime.NewScheme()
@@ -49,44 +52,20 @@ type patchOperation struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
-// Mount in the volumes and add the appropriate env vars to new pods
+// mutateHandler mounts in the volumes and adds the appropriate env vars to new pods
 func mutateHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%v\n", r)
-
-	var body []byte
-	if r.Body != nil {
-		if data, err := ioutil.ReadAll(r.Body); err == nil {
-			body = data
-		}
-	}
-
-	if len(body) == 0 {
-		log.Print("request body was empty, returning")
-		http.Error(w, "empty body", http.StatusBadRequest)
-		return
-	}
-
-	var admissionResponse *admissionv1.AdmissionResponse
-
-	ar := admissionv1.AdmissionReview{}
-	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
-		log.Printf("Can't decode body: %v", err)
-		admissionResponse = &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		}
-	}
+	ar := getAdmissionReview(w, r)
 
 	req := ar.Request
 	var pod corev1.Pod
 	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
 		log.Printf("Could not unmarshal raw object: %v", err)
-		admissionResponse = &admissionv1.AdmissionResponse{
+		writeError(w, &admissionv1.AdmissionResponse{
 			Result: &metav1.Status{
 				Message: err.Error(),
 			},
-		}
+		})
+		return
 	}
 
 	var patch []patchOperation
@@ -204,93 +183,29 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	patchBytes, err := json.Marshal(patch)
-	if err != nil {
-		admissionResponse = &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		}
-	}
-
-	if admissionResponse == nil {
-		admissionResponse = &admissionv1.AdmissionResponse{
-			Allowed: true,
-			Patch:   patchBytes,
-			PatchType: func() *admissionv1.PatchType {
-				pt := admissionv1.PatchTypeJSONPatch
-				return &pt
-			}(),
-		}
-	}
-
-	admissionReview := admissionv1.AdmissionReview{}
-	if admissionResponse != nil {
-		admissionReview.Response = admissionResponse
-		if ar.Request != nil {
-			admissionReview.Response.UID = ar.Request.UID
-		}
-	}
-	admissionReview.Kind = "AdmissionReview"
-	admissionReview.APIVersion = "admission.k8s.io/v1"
-
-	resp, err := json.Marshal(admissionReview)
-	if err != nil {
-		log.Printf("Can't encode response: %v", err)
-		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
-	}
-	log.Printf("Ready to write reponse ...")
-	if _, err := w.Write(resp); err != nil {
-		log.Printf("Can't write response: %v", err)
-		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
-	}
-
+	writePatch(w, ar, patch)
 }
 
-// Add image pull secret to new service accounts
+// serviceaccountHandler adds image pull secret to new service accounts
 func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%v\n", r)
-
-	var body []byte
-	if r.Body != nil {
-		if data, err := ioutil.ReadAll(r.Body); err == nil {
-			body = data
-		}
-	}
-
-	if len(body) == 0 {
-		log.Print("request body was empty, returning")
-		http.Error(w, "empty body", http.StatusBadRequest)
-		return
-	}
-
-	var admissionResponse *admissionv1.AdmissionResponse
-
-	ar := admissionv1.AdmissionReview{}
-	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
-		log.Printf("Can't decode body: %v", err)
-		admissionResponse = &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		}
-	}
+	ar := getAdmissionReview(w, r)
 
 	req := ar.Request
 	var sa corev1.ServiceAccount
 	if err := json.Unmarshal(req.Object.Raw, &sa); err != nil {
 		log.Printf("Could not unmarshal raw object: %v", err)
-		admissionResponse = &admissionv1.AdmissionResponse{
+		writeError(w, &admissionv1.AdmissionResponse{
 			Result: &metav1.Status{
 				Message: err.Error(),
 			},
-		}
+		})
+		return
 	}
 
 	// Make sure the gcp-auth secret exists before adding it as a pull secret
 	hasSecret := false
 	for _, s := range sa.Secrets {
-		if s.Name == "gcp-auth" {
+		if s.Name == gcpAuth {
 			hasSecret = true
 			break
 		}
@@ -299,7 +214,7 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 	var patch []patchOperation
 
 	if hasSecret {
-		ips := corev1.LocalObjectReference{Name: "gcp-auth"}
+		ips := corev1.LocalObjectReference{Name: gcpAuth}
 		if len(sa.ImagePullSecrets) == 0 {
 			patch = []patchOperation{{
 				Op:    "add",
@@ -315,42 +230,90 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	patchBytes, err := json.Marshal(patch)
-	if err != nil {
-		admissionResponse = &admissionv1.AdmissionResponse{
+	writePatch(w, ar, patch)
+}
+
+// getAdmissionReview reads and validates an inbound request and returns an admissionReview
+func getAdmissionReview(w http.ResponseWriter, r *http.Request) *admissionv1.AdmissionReview {
+	log.Printf("%v\n", r)
+
+	var body []byte
+	if r.Body != nil {
+		if data, err := ioutil.ReadAll(r.Body); err == nil {
+			body = data
+		}
+	}
+
+	if len(body) == 0 {
+		log.Print("request body was empty, returning")
+		http.Error(w, "empty body", http.StatusBadRequest)
+		return nil
+	}
+
+	ar := admissionv1.AdmissionReview{}
+	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
+		log.Printf("Can't decode body: %v", err)
+		writeError(w, &admissionv1.AdmissionResponse{
 			Result: &metav1.Status{
 				Message: err.Error(),
 			},
-		}
+		})
+		return nil
+	}
+	return &ar
+}
+
+// writeError writes an error response
+func writeError(w http.ResponseWriter, admissionResp *admissionv1.AdmissionResponse) {
+	admissionReview := admissionv1.AdmissionReview{
+		Response: admissionResp,
+	}
+	writeResp(w, admissionReview)
+}
+
+// writePatch writes a patch response
+func writePatch(w http.ResponseWriter, ar *admissionv1.AdmissionReview, patch []patchOperation) {
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		writeError(w, &admissionv1.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		})
+		return
 	}
 
-	if admissionResponse == nil {
-		admissionResponse = &admissionv1.AdmissionResponse{
-			Allowed: true,
-			Patch:   patchBytes,
-			PatchType: func() *admissionv1.PatchType {
-				pt := admissionv1.PatchTypeJSONPatch
-				return &pt
-			}(),
-		}
+	admissionResp := &admissionv1.AdmissionResponse{
+		Allowed: true,
+		Patch:   patchBytes,
+		PatchType: func() *admissionv1.PatchType {
+			pt := admissionv1.PatchTypeJSONPatch
+			return &pt
+		}(),
 	}
 
-	admissionReview := admissionv1.AdmissionReview{}
-	if admissionResponse != nil {
-		admissionReview.Response = admissionResponse
-		if ar.Request != nil {
-			admissionReview.Response.UID = ar.Request.UID
-		}
+	admissionReview := admissionv1.AdmissionReview{
+		Response: admissionResp,
 	}
+	if ar.Request != nil {
+		admissionReview.Response.UID = ar.Request.UID
+	}
+
+	writeResp(w, admissionReview)
+}
+
+// writeResp writes an admissionReview response
+func writeResp(w http.ResponseWriter, admissionReview admissionv1.AdmissionReview) {
 	admissionReview.Kind = "AdmissionReview"
 	admissionReview.APIVersion = "admission.k8s.io/v1"
 
+	log.Printf("Ready to marshal response ...")
 	resp, err := json.Marshal(admissionReview)
 	if err != nil {
 		log.Printf("Can't encode response: %v", err)
 		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
 	}
-	log.Printf("Ready to write reponse ...")
+	log.Printf("Ready to write response ...")
 	if _, err := w.Write(resp); err != nil {
 		log.Printf("Can't write response: %v", err)
 		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
