@@ -162,45 +162,50 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(envVars) > 0 {
-			for i, c := range pod.Spec.Containers {
-				if needsCreds {
-					if len(c.VolumeMounts) == 0 {
-						patch = append(patch, patchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-							Value: []corev1.VolumeMount{mount},
-						})
-					} else {
-						addMount := true
-						for _, vm := range c.VolumeMounts {
-							if vm.Name == mount.Name {
-								addMount = false
-								break
-							}
-						}
-						if addMount {
+			addCredsToContainer := func(containers []corev1.Container, container_uri string) {
+				for i, c := range containers {
+					if needsCreds {
+						if len(c.VolumeMounts) == 0 {
 							patch = append(patch, patchOperation{
 								Op:    "add",
-								Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-								Value: append(c.VolumeMounts, mount),
+								Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", container_uri, i),
+								Value: []corev1.VolumeMount{mount},
 							})
+						} else {
+							addMount := true
+							for _, vm := range c.VolumeMounts {
+								if vm.Name == mount.Name {
+									addMount = false
+									break
+								}
+							}
+							if addMount {
+								patch = append(patch, patchOperation{
+									Op:    "add",
+									Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", container_uri, i),
+									Value: append(c.VolumeMounts, mount),
+								})
+							}
 						}
 					}
-				}
-				if len(c.Env) == 0 {
-					patch = append(patch, patchOperation{
-						Op:    "add",
-						Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-						Value: envVars,
-					})
-				} else {
-					patch = append(patch, patchOperation{
-						Op:    "add",
-						Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-						Value: append(c.Env, envVars...),
-					})
+					if len(c.Env) == 0 {
+						patch = append(patch, patchOperation{
+							Op:    "add",
+							Path:  fmt.Sprintf("/spec/%s/%d/env", container_uri, i),
+							Value: envVars,
+						})
+					} else {
+						patch = append(patch, patchOperation{
+							Op:    "add",
+							Path:  fmt.Sprintf("/spec/%s/%d/env", container_uri, i),
+							Value: append(c.Env, envVars...),
+						})
+					}
 				}
 			}
+
+			addCredsToContainer(pod.Spec.Containers, "containers")
+			addCredsToContainer(pod.Spec.InitContainers, "initContainers")
 		}
 	}
 
