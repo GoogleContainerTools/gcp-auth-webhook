@@ -60,11 +60,7 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 	var pod corev1.Pod
 	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
 		log.Printf("Could not unmarshal raw object: %v", err)
-		writeError(w, &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		})
+		writeError(w, err)
 		return
 	}
 
@@ -199,40 +195,25 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 	var sa corev1.ServiceAccount
 	if err := json.Unmarshal(req.Object.Raw, &sa); err != nil {
 		log.Printf("Could not unmarshal raw object: %v", err)
-		writeError(w, &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		})
+		writeError(w, err)
 		return
-	}
-
-	// Make sure the gcp-auth secret exists before adding it as a pull secret
-	hasSecret := false
-	for _, s := range sa.Secrets {
-		if s.Name == gcpAuth {
-			hasSecret = true
-			break
-		}
 	}
 
 	var patch []patchOperation
 
-	if hasSecret {
-		ips := corev1.LocalObjectReference{Name: gcpAuth}
-		if len(sa.ImagePullSecrets) == 0 {
-			patch = []patchOperation{{
-				Op:    "add",
-				Path:  "/imagePullSecrets",
-				Value: []corev1.LocalObjectReference{ips},
-			}}
-		} else {
-			patch = []patchOperation{{
-				Op:    "add",
-				Path:  "/imagePullSecrets",
-				Value: append(sa.ImagePullSecrets, ips),
-			}}
-		}
+	ips := corev1.LocalObjectReference{Name: gcpAuth}
+	if len(sa.ImagePullSecrets) == 0 {
+		patch = []patchOperation{{
+			Op:    "add",
+			Path:  "/imagePullSecrets",
+			Value: []corev1.LocalObjectReference{ips},
+		}}
+	} else {
+		patch = []patchOperation{{
+			Op:    "add",
+			Path:  "/imagePullSecrets",
+			Value: append(sa.ImagePullSecrets, ips),
+		}}
 	}
 
 	writePatch(w, ar, patch)
@@ -240,8 +221,6 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 
 // getAdmissionReview reads and validates an inbound request and returns an admissionReview
 func getAdmissionReview(w http.ResponseWriter, r *http.Request) *admissionv1.AdmissionReview {
-	log.Printf("%v\n", r)
-
 	var body []byte
 	if r.Body != nil {
 		if data, err := ioutil.ReadAll(r.Body); err == nil {
@@ -258,20 +237,20 @@ func getAdmissionReview(w http.ResponseWriter, r *http.Request) *admissionv1.Adm
 	ar := admissionv1.AdmissionReview{}
 	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
 		log.Printf("Can't decode body: %v", err)
-		writeError(w, &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		})
+		writeError(w, err)
 		return nil
 	}
 	return &ar
 }
 
 // writeError writes an error response
-func writeError(w http.ResponseWriter, admissionResp *admissionv1.AdmissionResponse) {
+func writeError(w http.ResponseWriter, err error) {
 	admissionReview := admissionv1.AdmissionReview{
-		Response: admissionResp,
+		Response: &admissionv1.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		},
 	}
 	writeResp(w, admissionReview)
 }
@@ -280,11 +259,7 @@ func writeError(w http.ResponseWriter, admissionResp *admissionv1.AdmissionRespo
 func writePatch(w http.ResponseWriter, ar *admissionv1.AdmissionReview, patch []patchOperation) {
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		writeError(w, &admissionv1.AdmissionResponse{
-			Result: &metav1.Status{
-				Message: err.Error(),
-			},
-		})
+		writeError(w, err)
 		return
 	}
 
