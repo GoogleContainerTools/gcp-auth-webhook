@@ -6,7 +6,7 @@ ARCH=$(if $(findstring amd64, $(GOARCH)),x86_64,$(GOARCH))
 KO_VERSION=0.11.2
 
 build: ## Build the gcp-auth-webhook binary
-	CGO_ENABLED=0 GOOS=linux go build -o out/gcp-auth-webhook server.go
+	CGO_ENABLED=0 GOOS=linux go build -ldflags="-X 'main.Version=$(VERSION)'" -o out/gcp-auth-webhook server.go
 
 .PHONY: image
 image: ## Create and push multiarch manifest and images

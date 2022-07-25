@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/blang/semver/v4"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,7 @@ var (
 	runtimeScheme = runtime.NewScheme()
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
 	deserializer  = codecs.UniversalDeserializer()
+	Version       string
 )
 
 var projectAliases = []string{
@@ -309,8 +311,48 @@ func needsEnvVar(c corev1.Container, name string) bool {
 	return true
 }
 
+func updateCheck() error {
+	type release struct {
+		Name string `json:"name"`
+	}
+
+	var releases []release
+
+	resp, err := http.Get("https://storage.googleapis.com/minikube-gcp-auth/releases.json")
+	if err != nil {
+		return fmt.Errorf("failed to get releases file: %v", err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return fmt.Errorf("failed to decode releases file: %v", err)
+	}
+	if len(releases) == 0 {
+		return fmt.Errorf("no releases found in releases file")
+	}
+
+	currVersion, err := semver.ParseTolerant(Version)
+	if err != nil {
+		return fmt.Errorf("unable to parse current version: %v", err)
+	}
+	name := releases[0].Name
+	latestVersion, err := semver.ParseTolerant(name)
+	if err != nil {
+		return fmt.Errorf("unable to parse latest version: %v", err)
+	}
+
+	if currVersion.LT(latestVersion) {
+		log.Printf("gcp-auth-webhook %s is available!", name)
+	}
+
+	return nil
+}
+
 func main() {
 	log.Print("GCP Auth Webhook started!")
+
+	if err := updateCheck(); err != nil {
+		log.Println(err)
+	}
 
 	mux := http.NewServeMux()
 
