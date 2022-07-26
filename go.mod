@@ -3,6 +3,7 @@ module github.com/GoogleContainerTools/gcp-auth-webhook
 go 1.18
 
 require (
+	github.com/blang/semver/v4 v4.0.0
 	k8s.io/api v0.24.1
 	k8s.io/apimachinery v0.24.1
 )
