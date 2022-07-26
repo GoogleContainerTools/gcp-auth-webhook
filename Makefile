@@ -1,5 +1,5 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.0.9
+VERSION=v0.0.10
 GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 ARCH=$(if $(findstring amd64, $(GOARCH)),x86_64,$(GOARCH))
@@ -12,7 +12,7 @@ build: ## Build the gcp-auth-webhook binary
 image: ## Create and push multiarch manifest and images
 	@read -p "This will build and push $(REGISTRY)/gcp-auth-webhook:$(VERSION). Do you want to proceed? (Y/N): " confirm && echo $$confirm | grep -iq "^[yY]" || exit 1;
 	curl -L https://github.com/google/ko/releases/download/v$(KO_VERSION)/ko_$(KO_VERSION)_$(GOOS)_$(ARCH).tar.gz | tar xzf - ko && chmod +x ./ko
-	KO_DOCKER_REPO=$(REGISTRY) ./ko publish -B . --platform all -t $(VERSION)
+	GOFLAGS="-ldflags=-X=main.Version=$(VERSION)" KO_DOCKER_REPO=$(REGISTRY) ./ko publish -B . --platform all -t $(VERSION)
 	rm ./ko
 
 .PHONY: local-image
