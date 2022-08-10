@@ -21,6 +21,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/blang/semver/v4"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -347,12 +348,21 @@ func updateCheck() error {
 	return nil
 }
 
-func main() {
-	log.Print("GCP Auth Webhook started!")
-
+func updateTicker() {
 	if err := updateCheck(); err != nil {
 		log.Println(err)
 	}
+	for range time.Tick(12 * time.Hour) {
+		if err := updateCheck(); err != nil {
+			log.Println(err)
+		}
+	}
+}
+
+func main() {
+	log.Print("GCP Auth Webhook started!")
+
+	go updateTicker()
 
 	mux := http.NewServeMux()
 
