@@ -328,7 +328,7 @@ func updateCheck() {
 		log.Printf("failed to decode releases file: %v", err)
 	}
 	if len(releases) == 0 {
-		log.Printf("no releases found in releases file")
+		log.Print("no releases found in releases file")
 	}
 
 	currVersion, err := semver.ParseTolerant(Version)
