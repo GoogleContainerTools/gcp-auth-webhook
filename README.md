@@ -1,12 +1,12 @@
 # gcp-auth-webhook
 
 A server that includes:
-* A mutating webhook that will patch any newly created pods in your kubernetes cluster with GCP credentials (whose location is currently hardcoded to /var/lib/minikube/google_application_credentials.json).
-* A mutating webhook that will patch any newly created service accounts in your kubernetes cluster with an image pull secret.
+* A mutating webhook that will patch any newly created pods in your Kubernetes cluster with GCP credentials (whose location is currently hardcoded to /var/lib/minikube/google_application_credentials.json).
+* A mutating webhook that will patch any newly created service accounts in your Kubernetes cluster with an image pull secret.
 * A thread that monitors namespaces to make sure all namespaces include a image pull secret to be able to pull from GCR and AR.
 
 ## Deployment
-Use the image gcr.io/k8s-minikube/gcp-auth-webhook as the image for a Deployment in your Kubernetes manifest and add that to a MutatingWebhookConfiguration. See [minikube](https://github.com/kubernetes/minikube/blob/master/deploy/addons/gcp-auth/gcp-auth-webhook.yaml.tmpl) for details.
+Use the image `gcr.io/k8s-minikube/gcp-auth-webhook` as the image for a Deployment in your Kubernetes manifest and add that to a MutatingWebhookConfiguration. See [minikube](https://github.com/kubernetes/minikube/blob/master/deploy/addons/gcp-auth/gcp-auth-webhook.yaml.tmpl) for details.
 
 ## Running Locally
 The easiest way to run the server locally is:

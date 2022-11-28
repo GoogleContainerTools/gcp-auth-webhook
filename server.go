@@ -103,23 +103,9 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 		return nil
 	}
 
-	token, err := creds.TokenSource.Token()
-	if err != nil {
-		return err
-	}
-
-	var dockercfg string
-	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
-	for _, reg := range registries {
-		dockercfg += fmt.Sprintf(`"https://%s":{"username":"oauth2accesstoken","password":"%s","email":"none"},`, reg, token.AccessToken)
-	}
-	dockercfg = strings.TrimSuffix(dockercfg, ",")
-	data := map[string][]byte{
-		".dockercfg": []byte(fmt.Sprintf(`{%s}`, dockercfg)),
-	}
-
 	secrets := clientset.CoreV1().Secrets(ns.Name)
 
+	// check if gcp-auth secret already exists
 	exists := false
 	secList, err := secrets.List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
@@ -131,22 +117,35 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 			break
 		}
 	}
-
-	if !exists {
-		secretObj := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: gcpAuth,
-			},
-			Data: data,
-			Type: "kubernetes.io/dockercfg",
-		}
-
-		_, err = secrets.Create(context.TODO(), secretObj, metav1.CreateOptions{})
-		if err != nil {
-			return err
-		}
-
+	if exists {
+		return nil
 	}
+
+	token, err := creds.TokenSource.Token()
+	if err != nil {
+		return err
+	}
+	var dockercfg string
+	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
+	for _, reg := range registries {
+		dockercfg += fmt.Sprintf(`"https://%s":{"username":"oauth2accesstoken","password":"%s","email":"none"},`, reg, token.AccessToken)
+	}
+	dockercfg = strings.TrimSuffix(dockercfg, ",")
+	data := map[string][]byte{
+		".dockercfg": []byte(fmt.Sprintf(`{%s}`, dockercfg)),
+	}
+	secretObj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: gcpAuth,
+		},
+		Data: data,
+		Type: "kubernetes.io/dockercfg",
+	}
+	_, err = secrets.Create(context.TODO(), secretObj, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
