@@ -106,19 +106,14 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 	secrets := clientset.CoreV1().Secrets(ns.Name)
 
 	// check if gcp-auth secret already exists
-	exists := false
 	secList, err := secrets.List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
 	for _, s := range secList.Items {
 		if s.Name == gcpAuth {
-			exists = true
-			break
+			return nil
 		}
-	}
-	if exists {
-		return nil
 	}
 
 	token, err := creds.TokenSource.Token()
