@@ -15,21 +15,28 @@ limitations under the License.*/
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	gcr_config "github.com/GoogleCloudPlatform/docker-credential-gcr/config"
 	"github.com/blang/semver/v4"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"golang.org/x/oauth2/google"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const gcpAuth = "gcp-auth"
@@ -53,6 +60,92 @@ type patchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
 	Value interface{} `json:"value,omitempty"`
+}
+
+// watchNamespaces monitors newly created namespaces. On namespace creation, an image pull secret
+// will be created in the namespace to access GCR and AR registries. Any previously created
+// namespaces will also get the secret.
+func watchNamespaces() error {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("getting cluster config: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("getting clientset: %v", err)
+	}
+
+	// grab credentials from where GCP would normally look
+	ctx := context.Background()
+	creds, err := google.FindDefaultCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("finding default credentials: %v", err)
+	}
+
+	watcher, err := clientset.CoreV1().Namespaces().Watch(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("creating namespace watcher: %v", err)
+	}
+	for e := range watcher.ResultChan() {
+		ns := e.Object.(*corev1.Namespace)
+		if e.Type == watch.Added {
+			if err := createPullSecret(clientset, ns, creds); err != nil {
+				log.Printf("creating pull secret: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+// createPullSecret creates an image registry pull secret to the provided namespace using the provided creds.
+func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, creds *google.Credentials) error {
+	if skipNamespace(ns.Name) {
+		return nil
+	}
+
+	secrets := clientset.CoreV1().Secrets(ns.Name)
+
+	// check if gcp-auth secret already exists
+	secList, err := secrets.List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, s := range secList.Items {
+		if s.Name == gcpAuth {
+			return nil
+		}
+	}
+
+	token, err := creds.TokenSource.Token()
+	if err != nil {
+		return err
+	}
+	var dockercfg string
+	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
+	for _, reg := range registries {
+		dockercfg += fmt.Sprintf(`"https://%s":{"username":"oauth2accesstoken","password":"%s","email":"none"},`, reg, token.AccessToken)
+	}
+	dockercfg = strings.TrimSuffix(dockercfg, ",")
+	data := map[string][]byte{
+		".dockercfg": []byte(fmt.Sprintf(`{%s}`, dockercfg)),
+	}
+	secretObj := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: gcpAuth,
+		},
+		Data: data,
+		Type: "kubernetes.io/dockercfg",
+	}
+	_, err = secrets.Create(context.TODO(), secretObj, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func skipNamespace(name string) bool {
+	return name == metav1.NamespaceSystem || name == gcpAuth
 }
 
 // mutateHandler mounts in the volumes and adds the appropriate env vars to new pods
@@ -125,7 +218,7 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 
 		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
 		if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
-			project, err := ioutil.ReadFile("/var/lib/minikube/google_cloud_project")
+			project, err := os.ReadFile("/var/lib/minikube/google_cloud_project")
 			if err == nil {
 				// Set the project name for every variant of the project env var
 				for _, a := range projectAliases {
@@ -226,7 +319,7 @@ func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 func getAdmissionReview(w http.ResponseWriter, r *http.Request) *admissionv1.AdmissionReview {
 	var body []byte
 	if r.Body != nil {
-		if data, err := ioutil.ReadAll(r.Body); err == nil {
+		if data, err := io.ReadAll(r.Body); err == nil {
 			body = data
 		}
 	}
@@ -312,7 +405,7 @@ func needsEnvVar(c corev1.Container, name string) bool {
 	return true
 }
 
-func updateCheck() {
+func updateCheck() error {
 	type release struct {
 		Name string `json:"name"`
 	}
@@ -321,35 +414,40 @@ func updateCheck() {
 
 	resp, err := http.Get("https://storage.googleapis.com/minikube-gcp-auth/releases.json")
 	if err != nil {
-		log.Printf("failed to get releases file: %v", err)
+		return fmt.Errorf("failed to get releases file: %v", err)
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		log.Printf("failed to decode releases file: %v", err)
+		return fmt.Errorf("failed to decode releases file: %v", err)
 	}
 	if len(releases) == 0 {
-		log.Print("no releases found in releases file")
+		return fmt.Errorf("no releases found in releases file")
 	}
 
 	currVersion, err := semver.ParseTolerant(Version)
 	if err != nil {
-		log.Printf("unable to parse current version: %v", err)
+		return fmt.Errorf("unable to parse current version: %v", err)
 	}
 	name := releases[0].Name
 	latestVersion, err := semver.ParseTolerant(name)
 	if err != nil {
-		log.Printf("unable to parse latest version: %v", err)
+		return fmt.Errorf("unable to parse latest version: %v", err)
 	}
 
 	if currVersion.LT(latestVersion) {
 		log.Printf("gcp-auth-webhook %s is available!", name)
 	}
+	return nil
 }
 
 func updateTicker() {
-	updateCheck()
+	if err := updateCheck(); err != nil {
+		log.Print(err)
+	}
 	for range time.Tick(12 * time.Hour) {
-		updateCheck()
+		if err := updateCheck(); err != nil {
+			log.Print(err)
+		}
 	}
 }
 
@@ -357,6 +455,11 @@ func main() {
 	log.Print("GCP Auth Webhook started!")
 
 	go updateTicker()
+	go func() {
+		if err := watchNamespaces(); err != nil {
+			log.Printf("Failed to watch namespaces, please update minikube and disable/re-enable the gcp-auth addon: %v", err)
+		}
+	}()
 
 	mux := http.NewServeMux()
 
