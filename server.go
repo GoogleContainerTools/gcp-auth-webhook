@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -116,9 +118,16 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 		}
 	}
 
-	token, err := creds.TokenSource.Token()
-	if err != nil {
-		return err
+	// The MOCK_GOOGLE_TOKEN env var prevents using credentials to fetch the token. Instead the token will be mocked.
+	mockToken, _ := strconv.ParseBool(os.Getenv("MOCK_GOOGLE_TOKEN"))
+	var token *oauth2.Token
+	if mockToken {
+		token = &oauth2.Token{AccessToken: "mock_access_token"}
+	} else {
+		token, err = creds.TokenSource.Token()
+		if err != nil {
+			return err
+		}
 	}
 	var dockercfg string
 	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
