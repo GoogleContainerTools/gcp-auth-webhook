@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM scratch
+# base image is the same as ko (see https://ko.build/configuration/)
+FROM gcr.io/distroless/static:nonroot
 COPY gcp-auth-webhook /gcp-auth-webhook
 ENTRYPOINT ["/gcp-auth-webhook"]

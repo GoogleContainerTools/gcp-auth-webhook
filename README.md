@@ -12,11 +12,6 @@ Use the image `gcr.io/k8s-minikube/gcp-auth-webhook` as the image for a Deployme
 
 ## Running Locally
 The easiest way to run the server locally is:
-* Remove `FROM scratch` in the Dockerfile and replace it with the following to ensure https requests work properly locally:
-```
-FROM alpine
-RUN apk --no-cache add ca-certificates
-```
 * Modify [minikube's](https://github.com/kubernetes/minikube/blob/master/deploy/addons/gcp-auth/gcp-auth-webhook.yaml.tmpl) gcp-auth Deployment image to be `local/gcp-auth-webhook:$(VERSION)` (replace `$(VERSION)` with your version)
 * Build and run minikube
 * Run `eval $(path_to_minikube/minikube docker-env)` and then `make local-image` to make the image available from within minikube
