@@ -1,9 +1,9 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.0.11
+VERSION=v0.0.13
 GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 ARCH=$(if $(findstring amd64, $(GOARCH)),x86_64,$(GOARCH))
-KO_VERSION=0.11.2
+KO_VERSION=0.12.0
 
 build: ## Build the gcp-auth-webhook binary
 	CGO_ENABLED=0 GOOS=linux go build -ldflags="-X 'main.Version=$(VERSION)'" -o out/gcp-auth-webhook server.go
