@@ -13,6 +13,6 @@
 # limitations under the License.
 
 # base image is the same as ko (see https://ko.build/configuration/)
-FROM gcr.io/distroless/static:nonroot
+FROM cgr.dev/chainguard/static:latest
 COPY gcp-auth-webhook /gcp-auth-webhook
 ENTRYPOINT ["/gcp-auth-webhook"]
