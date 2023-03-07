@@ -7,7 +7,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	golang.org/x/oauth2 v0.5.0
 	k8s.io/api v0.26.1
-	k8s.io/apimachinery v0.26.1
+	k8s.io/apimachinery v0.26.2
 	k8s.io/client-go v0.26.1
 )
 
