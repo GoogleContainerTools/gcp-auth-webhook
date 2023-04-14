@@ -1,0 +1,10 @@
+name: build
+on:
+  pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab
+      - uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9
+      - run: make build
