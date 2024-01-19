@@ -153,6 +153,61 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 	return nil
 }
 
+// createAllPullSecrets creates an image registry pull secret for all namespaces
+func createAllPullSecrets(clientset *kubernetes.Clientset, namespaces []corev1.Namespace) error {
+	ctx := context.Background()
+	creds, err := google.FindDefaultCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("finding default credentials: %v", err)
+	}
+	for _, ns := range namespaces {
+		if err := createPullSecret(clientset, &ns, creds); err != nil {
+			log.Printf("failed creating pull secret in %s namespace: %v", ns.Name, err)
+		}
+	}
+	return nil
+}
+
+// deleteAllPullSecrets deletes the image registry pull secret for all namespaces
+func deleteAllPullSecrets(clientset *kubernetes.Clientset, namespaces []corev1.Namespace) {
+	for _, ns := range namespaces {
+		secrets := clientset.CoreV1().Secrets(ns.Name)
+		if err := secrets.Delete(context.TODO(), gcpAuth, metav1.DeleteOptions{}); err != nil {
+			log.Printf("failed deleting %s secret in %s namespace: %v", gcpAuth, ns.Name, err)
+		}
+	}
+}
+
+// refreshAllPullSecrets deletes and recreates image registry pull secrets for all namespaces
+func refreshAllPullSecrets() error {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("getting cluster config: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("getting clientset: %v", err)
+	}
+	namespaceList, err := clientset.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("listing namespaces: %v", err)
+	}
+	deleteAllPullSecrets(clientset, namespaceList.Items)
+	if err := createAllPullSecrets(clientset, namespaceList.Items); err != nil {
+		return fmt.Errorf("creating all pull secrets: %v", err)
+	}
+	return nil
+}
+
+// pullSecretTicker refreshes all the image registry pull secrets every hour
+func pullSecretTicker() {
+	for range time.Tick(1 * time.Hour) {
+		if err := refreshAllPullSecrets(); err != nil {
+			log.Print(err)
+		}
+	}
+}
+
 func skipNamespace(name string) bool {
 	return name == metav1.NamespaceSystem || name == gcpAuth
 }
@@ -464,6 +519,7 @@ func main() {
 	log.Print("GCP Auth Webhook started!")
 
 	go updateTicker()
+	go pullSecretTicker()
 	go func() {
 		if err := watchNamespaces(); err != nil {
 			log.Printf("Failed to watch namespaces, please update minikube and disable/re-enable the gcp-auth addon: %v", err)

@@ -1,6 +1,8 @@
 module github.com/GoogleContainerTools/gcp-auth-webhook
 
-go 1.18
+go 1.21
+
+toolchain go1.21.6
 
 require (
 	github.com/GoogleCloudPlatform/docker-credential-gcr v2.0.5+incompatible
