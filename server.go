@@ -153,33 +153,21 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 	return nil
 }
 
-// createAllPullSecrets creates an image registry pull secret for all namespaces
-func createAllPullSecrets(clientset *kubernetes.Clientset, namespaces []corev1.Namespace) error {
-	ctx := context.Background()
-	creds, err := google.FindDefaultCredentials(ctx)
-	if err != nil {
-		return fmt.Errorf("finding default credentials: %v", err)
-	}
-	for _, ns := range namespaces {
-		if err := createPullSecret(clientset, &ns, creds); err != nil {
-			log.Printf("failed creating pull secret in %s namespace: %v", ns.Name, err)
-		}
+// deletePullSecret deletes the image registry pull secret for the provided namespace
+func deletePullSecret(clientset *kubernetes.Clientset, ns corev1.Namespace) error {
+	secrets := clientset.CoreV1().Secrets(ns.Name)
+	if err := secrets.Delete(context.TODO(), gcpAuth, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("deleting %s secret in %s namespace: %v", gcpAuth, ns.Name, err)
 	}
 	return nil
 }
 
-// deleteAllPullSecrets deletes the image registry pull secret for all namespaces
-func deleteAllPullSecrets(clientset *kubernetes.Clientset, namespaces []corev1.Namespace) {
-	for _, ns := range namespaces {
-		secrets := clientset.CoreV1().Secrets(ns.Name)
-		if err := secrets.Delete(context.TODO(), gcpAuth, metav1.DeleteOptions{}); err != nil {
-			log.Printf("failed deleting %s secret in %s namespace: %v", gcpAuth, ns.Name, err)
-		}
-	}
-}
-
 // refreshAllPullSecrets deletes and recreates image registry pull secrets for all namespaces
 func refreshAllPullSecrets() error {
+	creds, err := google.FindDefaultCredentials(context.Background())
+	if err != nil {
+		return fmt.Errorf("finding default credentials: %v", err)
+	}
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return fmt.Errorf("getting cluster config: %v", err)
@@ -192,9 +180,16 @@ func refreshAllPullSecrets() error {
 	if err != nil {
 		return fmt.Errorf("listing namespaces: %v", err)
 	}
-	deleteAllPullSecrets(clientset, namespaceList.Items)
-	if err := createAllPullSecrets(clientset, namespaceList.Items); err != nil {
-		return fmt.Errorf("creating all pull secrets: %v", err)
+	for _, ns := range namespaceList.Items {
+		if ns.Name == "kube-system" || ns.Name == "gcp-auth" {
+			continue
+		}
+		if err := deletePullSecret(clientset, ns); err != nil {
+			log.Println(err)
+		}
+		if err := createPullSecret(clientset, &ns, creds); err != nil {
+			log.Println(err)
+		}
 	}
 	return nil
 }
