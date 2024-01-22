@@ -181,22 +181,23 @@ func refreshAllPullSecrets() error {
 		return fmt.Errorf("listing namespaces: %v", err)
 	}
 	for _, ns := range namespaceList.Items {
-		if ns.Name == "kube-system" || ns.Name == "gcp-auth" {
+		if skipNamespace(ns.Name) {
 			continue
 		}
 		if err := deletePullSecret(clientset, ns); err != nil {
-			log.Println(err)
+			log.Print(err)
 		}
 		if err := createPullSecret(clientset, &ns, creds); err != nil {
-			log.Println(err)
+			log.Print(err)
 		}
 	}
 	return nil
 }
 
-// pullSecretTicker refreshes all the image registry pull secrets every hour
+// pullSecretTicker refreshes all the image registry pull secrets every six hours
 func pullSecretTicker() {
-	for range time.Tick(1 * time.Hour) {
+	for range time.Tick(6 * time.Hour) {
+		log.Print("refreshing image pull secrets")
 		if err := refreshAllPullSecrets(); err != nil {
 			log.Print(err)
 		}
