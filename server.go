@@ -194,9 +194,9 @@ func refreshAllPullSecrets() error {
 	return nil
 }
 
-// pullSecretTicker refreshes all the image registry pull secrets every six hours
+// pullSecretTicker refreshes all the image registry pull secrets every hour
 func pullSecretTicker() {
-	for range time.Tick(6 * time.Hour) {
+	for range time.Tick(1 * time.Hour) {
 		log.Print("refreshing image pull secrets")
 		if err := refreshAllPullSecrets(); err != nil {
 			log.Print(err)
