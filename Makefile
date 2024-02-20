@@ -1,5 +1,5 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.1.0
+VERSION=v0.1.1
 GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 ARCH=$(if $(findstring amd64, $(GOARCH)),x86_64,$(GOARCH))
