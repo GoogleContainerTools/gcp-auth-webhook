@@ -153,6 +153,57 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 	return nil
 }
 
+// deletePullSecret deletes the image registry pull secret for the provided namespace
+func deletePullSecret(clientset *kubernetes.Clientset, ns corev1.Namespace) error {
+	secrets := clientset.CoreV1().Secrets(ns.Name)
+	if err := secrets.Delete(context.TODO(), gcpAuth, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("deleting %s secret in %s namespace: %v", gcpAuth, ns.Name, err)
+	}
+	return nil
+}
+
+// refreshAllPullSecrets deletes and recreates image registry pull secrets for all namespaces
+func refreshAllPullSecrets() error {
+	creds, err := google.FindDefaultCredentials(context.Background())
+	if err != nil {
+		return fmt.Errorf("finding default credentials: %v", err)
+	}
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("getting cluster config: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("getting clientset: %v", err)
+	}
+	namespaceList, err := clientset.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("listing namespaces: %v", err)
+	}
+	for _, ns := range namespaceList.Items {
+		if skipNamespace(ns.Name) {
+			continue
+		}
+		if err := deletePullSecret(clientset, ns); err != nil {
+			log.Print(err)
+		}
+		if err := createPullSecret(clientset, &ns, creds); err != nil {
+			log.Print(err)
+		}
+	}
+	return nil
+}
+
+// pullSecretTicker refreshes all the image registry pull secrets every hour
+func pullSecretTicker() {
+	for range time.Tick(1 * time.Hour) {
+		log.Print("refreshing image pull secrets")
+		if err := refreshAllPullSecrets(); err != nil {
+			log.Print(err)
+		}
+	}
+}
+
 func skipNamespace(name string) bool {
 	return name == metav1.NamespaceSystem || name == gcpAuth
 }
@@ -464,6 +515,7 @@ func main() {
 	log.Print("GCP Auth Webhook started!")
 
 	go updateTicker()
+	go pullSecretTicker()
 	go func() {
 		if err := watchNamespaces(); err != nil {
 			log.Printf("Failed to watch namespaces, please update minikube and disable/re-enable the gcp-auth addon: %v", err)
