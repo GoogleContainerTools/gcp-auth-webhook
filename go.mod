@@ -7,7 +7,7 @@ toolchain go1.21.6
 require (
 	github.com/GoogleCloudPlatform/docker-credential-gcr v2.0.5+incompatible
 	github.com/blang/semver/v4 v4.0.0
-	golang.org/x/oauth2 v0.17.0
+	golang.org/x/oauth2 v0.18.0
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
@@ -32,9 +32,9 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	golang.org/x/net v0.21.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
-	golang.org/x/term v0.17.0 // indirect
+	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/term v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
