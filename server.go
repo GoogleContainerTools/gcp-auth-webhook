@@ -118,11 +118,13 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 		}
 	}
 
+	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
 	// The MOCK_GOOGLE_TOKEN env var prevents using credentials to fetch the token. Instead the token will be mocked.
 	mockToken, _ := strconv.ParseBool(os.Getenv("MOCK_GOOGLE_TOKEN"))
 	var token *oauth2.Token
 	if mockToken {
 		token = &oauth2.Token{AccessToken: "mock_access_token"}
+		registries = []string{"mock-registry"}
 	} else {
 		token, err = creds.TokenSource.Token()
 		if err != nil {
@@ -130,7 +132,6 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 		}
 	}
 	var dockercfg string
-	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
 	for _, reg := range registries {
 		dockercfg += fmt.Sprintf(`"https://%s":{"username":"oauth2accesstoken","password":"%s","email":"none"},`, reg, token.AccessToken)
 	}
