@@ -1,9 +1,9 @@
 REGISTRY?=gcr.io/k8s-minikube
-VERSION=v0.1.2
+VERSION=v0.1.3
 GOOS?=$(shell go env GOOS)
 GOARCH?=$(shell go env GOARCH)
 ARCH=$(if $(findstring amd64, $(GOARCH)),x86_64,$(GOARCH))
-KO_VERSION=0.15.2
+KO_VERSION=0.16.0
 BASE_IMAGE?=gcr.io/distroless/static:nonroot
 
 build: ## Build the gcp-auth-webhook binary
