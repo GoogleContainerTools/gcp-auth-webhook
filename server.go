@@ -119,7 +119,12 @@ func createPullSecret(clientset *kubernetes.Clientset, ns *corev1.Namespace, cre
 	}
 
 	registries := append(gcr_config.DefaultGCRRegistries[:], gcr_config.DefaultARRegistries[:]...)
-	// The MOCK_GOOGLE_TOKEN env var prevents using credentials to fetch the token. Instead the token will be mocked.
+
+	// The MOCK_GOOGLE_TOKEN env var prevents using credentials to fetch the
+	// token. Instead the token will be mocked. It also sets a mock registry
+	// due to pulls to Artifact Registry for publicly available images with
+	// mock credentials causing unauthorized errors. See:
+	// https://github.com/kubernetes/minikube/issues/19714
 	mockToken, _ := strconv.ParseBool(os.Getenv("MOCK_GOOGLE_TOKEN"))
 	var token *oauth2.Token
 	if mockToken {
