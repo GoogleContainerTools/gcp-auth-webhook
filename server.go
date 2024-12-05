@@ -79,7 +79,7 @@ func watchNamespaces() error {
 
 	// grab credentials from where GCP would normally look
 	ctx := context.Background()
-	creds, err := google.FindDefaultCredentials(ctx)
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return fmt.Errorf("finding default credentials: %v", err)
 	}
