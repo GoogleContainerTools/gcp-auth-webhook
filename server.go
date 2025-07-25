@@ -170,7 +170,7 @@ func deletePullSecret(clientset *kubernetes.Clientset, ns corev1.Namespace) erro
 
 // refreshAllPullSecrets deletes and recreates image registry pull secrets for all namespaces
 func refreshAllPullSecrets() error {
-	creds, err := google.FindDefaultCredentials(context.Background())
+	creds, err := google.FindDefaultCredentials(context.Background(), "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return fmt.Errorf("finding default credentials: %v", err)
 	}
