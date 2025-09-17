@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/GoogleCloudPlatform/docker-credential-gcr v2.0.5+incompatible
 	github.com/blang/semver/v4 v4.0.0
-	golang.org/x/oauth2 v0.27.0
+	golang.org/x/oauth2 v0.31.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
