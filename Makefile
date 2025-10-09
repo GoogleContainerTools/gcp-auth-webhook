@@ -12,7 +12,7 @@ build: ## Build the gcp-auth-webhook binary
 .PHONY: image
 image: ## Create and push multiarch manifest and images
 	@read -p "This will build and push $(REGISTRY)/gcp-auth-webhook:$(VERSION). Do you want to proceed? (Y/N): " confirm && echo $$confirm | grep -iq "^[yY]" || exit 1;
-	curl -L https://github.com/google/ko/releases/download/v$(KO_VERSION)/ko_$(KO_VERSION)_$(GOOS)_$(ARCH).tar.gz | tar xzf - ko && chmod +x ./ko
+	curl -L https://github.com/ko-build/ko/releases/download/v$(KO_VERSION)/ko_$(KO_VERSION)_$(GOOS)_$(ARCH).tar.gz | tar xzf - ko && chmod +x ./ko
 	GOFLAGS="-ldflags=-X=main.Version=$(VERSION)" KO_DOCKER_REPO=$(REGISTRY) KO_DEFAULTBASEIMAGE=$(BASE_IMAGE) ./ko publish -B . --platform all -t $(VERSION)
 	rm ./ko
 
