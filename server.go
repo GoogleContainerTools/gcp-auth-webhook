@@ -43,6 +43,8 @@ import (
 
 const gcpAuth = "gcp-auth"
 
+const gcpAuthScope = "https://www.googleapis.com/auth/cloud-platform"
+
 var (
 	runtimeScheme = runtime.NewScheme()
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
@@ -79,7 +81,7 @@ func watchNamespaces() error {
 
 	// grab credentials from where GCP would normally look
 	ctx := context.Background()
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	creds, err := google.FindDefaultCredentials(ctx, gcpAuthScope)
 	if err != nil {
 		return fmt.Errorf("finding default credentials: %v", err)
 	}
@@ -170,7 +172,7 @@ func deletePullSecret(clientset *kubernetes.Clientset, ns corev1.Namespace) erro
 
 // refreshAllPullSecrets deletes and recreates image registry pull secrets for all namespaces
 func refreshAllPullSecrets() error {
-	creds, err := google.FindDefaultCredentials(context.Background())
+	creds, err := google.FindDefaultCredentials(context.Background(), gcpAuthScope)
 	if err != nil {
 		return fmt.Errorf("finding default credentials: %v", err)
 	}
