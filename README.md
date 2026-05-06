@@ -12,7 +12,6 @@ Use the image `gcr.io/k8s-minikube/gcp-auth-webhook` as the image for a Deployme
 
 ## Running Locally
 The easiest way to run the server locally is:
-* Modify [minikube's](https://github.com/kubernetes/minikube/blob/master/deploy/addons/gcp-auth/gcp-auth-webhook.yaml.tmpl) gcp-auth Deployment image to be `local/gcp-auth-webhook:$(VERSION)` (replace `$(VERSION)` with your version)
 * Build and run minikube
-* Run `eval $(path_to_minikube/minikube docker-env)` and then `make local-image` to make the image available from within minikube
-* Run `path_to_minikube/minikube addons enable gcp-auth` to enable the addon, which creates a pod in the `gcp-auth` namespace with the gcp-auth-webhook server
+* Run `eval $(minikube docker-env)` and then `make local-image VERSION=VERSION` (replace `VERSION` with your local version) to build and make the image available within minikube's Docker daemon
+* Run `minikube addons enable gcp-auth --images=GCPAuthWebhook=local/gcp-auth-webhook:VERSION` (replace `VERSION` with your local version) to enable the addon using your local image
