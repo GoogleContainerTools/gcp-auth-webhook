@@ -23,3 +23,10 @@ image: ## Create and push multiarch manifest and images
 .PHONY: local-image
 local-image: build
 	docker build -t local/gcp-auth-webhook:$(VERSION) -f Dockerfile ./out
+
+.PHONY: integration-test
+integration-test: ## Run integration tests in minikube
+	GCP_AUTH_VERSION=$(VERSION) go test -v -tags=integration -timeout=10m ./test/integration/...
+
+
+
