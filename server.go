@@ -70,6 +70,24 @@ type patchOperation struct {
 // will be created in the namespace to access GCR and AR registries. Any previously created
 // namespaces will also get the secret.
 func watchNamespaces() error {
+	var delay time.Duration = 1 * time.Second
+	for {
+		err := watchNamespacesOnce()
+		if err != nil {
+			log.Printf("Namespace watcher failed: %v. Retrying in %v...", err, delay)
+		} else {
+			log.Printf("Namespace watcher finished or disconnected. Retrying in %v...", delay)
+		}
+		time.Sleep(delay)
+		// Exponential backoff up to 1 minute
+		delay *= 2
+		if delay > 1*time.Minute {
+			delay = 1 * time.Minute
+		}
+	}
+}
+
+func watchNamespacesOnce() error {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return fmt.Errorf("getting cluster config: %v", err)
@@ -90,8 +108,15 @@ func watchNamespaces() error {
 	if err != nil {
 		return fmt.Errorf("creating namespace watcher: %v", err)
 	}
+	defer watcher.Stop()
+
+	log.Print("Namespace watcher connection established.")
 	for e := range watcher.ResultChan() {
-		ns := e.Object.(*corev1.Namespace)
+		ns, ok := e.Object.(*corev1.Namespace)
+		if !ok {
+			log.Printf("watchNamespacesReceived unexpected object type: %T", e.Object)
+			continue
+		}
 		if e.Type == watch.Added {
 			if err := createPullSecret(clientset, ns, creds); err != nil {
 				log.Printf("creating pull secret: %v", err)
@@ -204,7 +229,9 @@ func refreshAllPullSecrets() error {
 
 // pullSecretTicker refreshes all the image registry pull secrets every hour
 func pullSecretTicker() {
-	for range time.Tick(1 * time.Hour) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
 		log.Print("refreshing image pull secrets")
 		if err := refreshAllPullSecrets(); err != nil {
 			log.Print(err)
@@ -232,26 +259,26 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var patch []patchOperation
-	var envVars []corev1.EnvVar
 
-	needsCreds := needsEnvVar(pod.Spec.Containers[0], "GOOGLE_APPLICATION_CREDENTIALS")
+	if len(pod.Spec.Containers) == 0 {
+		log.Print("Pod has no containers, skipping mutation")
+		writePatch(w, ar, patch)
+		return
+	}
 
 	// Explicitly and silently exclude the kube-system namespace
 	if pod.ObjectMeta.Namespace != metav1.NamespaceSystem {
-		// Define the volume to mount in
+		// Define the volume to potentially inject
 		v := corev1.Volume{
 			Name: "gcp-creds",
 			VolumeSource: corev1.VolumeSource{
-				HostPath: func() *corev1.HostPathVolumeSource {
-					h := corev1.HostPathVolumeSource{
-						Path: "/var/lib/minikube/google_application_credentials.json",
-						Type: func() *corev1.HostPathType {
-							hpt := corev1.HostPathFile
-							return &hpt
-						}(),
-					}
-					return &h
-				}(),
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/var/lib/minikube/google_application_credentials.json",
+					Type: func() *corev1.HostPathType {
+						hpt := corev1.HostPathFile
+						return &hpt
+					}(),
+				},
 			},
 		}
 
@@ -262,15 +289,17 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 			ReadOnly:  true,
 		}
 
-		if needsCreds {
-			// Define the env var
-			e := corev1.EnvVar{
-				Name:  "GOOGLE_APPLICATION_CREDENTIALS",
-				Value: "/google-app-creds.json",
+		// Check if any container actually needs credentials
+		anyContainerNeedsCreds := false
+		for _, c := range append(pod.Spec.Containers, pod.Spec.InitContainers...) {
+			if needsEnvVar(c, "GOOGLE_APPLICATION_CREDENTIALS") {
+				anyContainerNeedsCreds = true
+				break
 			}
-			envVars = append(envVars, e)
+		}
 
-			// add the volume in the list of patches
+		if anyContainerNeedsCreds {
+			// Add the volume to the Pod if it isn't already there
 			addVolume := true
 			for _, vl := range pod.Spec.Volumes {
 				if vl.Name == v.Name {
@@ -287,68 +316,83 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// If GOOGLE_CLOUD_PROJECT is set in the VM, set it for all GCP apps.
+		// Fetch project name from host if present
+		var project string
 		if _, err := os.Stat("/var/lib/minikube/google_cloud_project"); err == nil {
-			project, err := os.ReadFile("/var/lib/minikube/google_cloud_project")
-			if err == nil {
-				// Set the project name for every variant of the project env var
-				for _, a := range projectAliases {
-					if needsEnvVar(pod.Spec.Containers[0], a) {
-						envVars = append(envVars, corev1.EnvVar{
-							Name:  a,
-							Value: string(project),
-						})
-					}
-				}
+			if projectData, err := os.ReadFile("/var/lib/minikube/google_cloud_project"); err == nil {
+				project = strings.TrimSpace(string(projectData))
 			}
 		}
 
-		if len(envVars) > 0 {
-			addCredsToContainer := func(containers []corev1.Container, container_uri string) {
-				for i, c := range containers {
-					if needsCreds {
+		mutateContainers := func(containers []corev1.Container, pathPrefix string) {
+			for i, c := range containers {
+				var containerEnvVars []corev1.EnvVar
+				containerNeedsCreds := needsEnvVar(c, "GOOGLE_APPLICATION_CREDENTIALS")
+
+				if containerNeedsCreds {
+					containerEnvVars = append(containerEnvVars, corev1.EnvVar{
+						Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+						Value: "/google-app-creds.json",
+					})
+
+					// Add volume mount to this container
+					addMount := true
+					for _, vm := range c.VolumeMounts {
+						if vm.Name == mount.Name {
+							addMount = false
+							break
+						}
+					}
+					if addMount {
 						if len(c.VolumeMounts) == 0 {
 							patch = append(patch, patchOperation{
 								Op:    "add",
-								Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", container_uri, i),
+								Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", pathPrefix, i),
 								Value: []corev1.VolumeMount{mount},
 							})
 						} else {
-							addMount := true
-							for _, vm := range c.VolumeMounts {
-								if vm.Name == mount.Name {
-									addMount = false
-									break
-								}
-							}
-							if addMount {
-								patch = append(patch, patchOperation{
-									Op:    "add",
-									Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", container_uri, i),
-									Value: append(c.VolumeMounts, mount),
-								})
-							}
+							patch = append(patch, patchOperation{
+								Op:    "add",
+								Path:  fmt.Sprintf("/spec/%s/%d/volumeMounts", pathPrefix, i),
+								Value: append(c.VolumeMounts, mount),
+							})
 						}
 					}
+				}
+
+				// Add GCP project variables if available on host
+				if project != "" {
+					for _, a := range projectAliases {
+						if needsEnvVar(c, a) {
+							containerEnvVars = append(containerEnvVars, corev1.EnvVar{
+								Name:  a,
+								Value: project,
+							})
+						}
+					}
+				}
+
+				// Patch environment variables for this container if any were added
+				if len(containerEnvVars) > 0 {
 					if len(c.Env) == 0 {
 						patch = append(patch, patchOperation{
 							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d/env", container_uri, i),
-							Value: envVars,
+							Path:  fmt.Sprintf("/spec/%s/%d/env", pathPrefix, i),
+							Value: containerEnvVars,
 						})
 					} else {
 						patch = append(patch, patchOperation{
 							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d/env", container_uri, i),
-							Value: append(c.Env, envVars...),
+							Path:  fmt.Sprintf("/spec/%s/%d/env", pathPrefix, i),
+							Value: append(c.Env, containerEnvVars...),
 						})
 					}
 				}
 			}
-
-			addCredsToContainer(pod.Spec.Containers, "containers")
-			addCredsToContainer(pod.Spec.InitContainers, "initContainers")
 		}
+
+		mutateContainers(pod.Spec.Containers, "containers")
+		mutateContainers(pod.Spec.InitContainers, "initContainers")
 	}
 
 	writePatch(w, ar, patch)
@@ -518,7 +562,9 @@ func updateTicker() {
 	if err := updateCheck(); err != nil {
 		log.Print(err)
 	}
-	for range time.Tick(12 * time.Hour) {
+	ticker := time.NewTicker(12 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
 		if err := updateCheck(); err != nil {
 			log.Print(err)
 		}
@@ -542,8 +588,12 @@ func main() {
 	mux.HandleFunc("/mutate/sa", serviceaccountHandler)
 
 	s := &http.Server{
-		Addr:    ":8443",
-		Handler: mux,
+		Addr:              ":8443",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Fatal(s.ListenAndServeTLS("/etc/webhook/certs/cert", "/etc/webhook/certs/key"))
