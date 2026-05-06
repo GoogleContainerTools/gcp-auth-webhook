@@ -9,6 +9,10 @@ BASE_IMAGE?=gcr.io/distroless/static:nonroot
 build: ## Build the gcp-auth-webhook binary
 	CGO_ENABLED=0 GOOS=linux go build -ldflags="-X 'main.Version=$(VERSION)'" -o out/gcp-auth-webhook server.go
 
+.PHONY: test
+test: ## Run unit tests
+	go test -v -race ./...
+
 .PHONY: image
 image: ## Create and push multiarch manifest and images
 	@read -p "This will build and push $(REGISTRY)/gcp-auth-webhook:$(VERSION). Do you want to proceed? (Y/N): " confirm && echo $$confirm | grep -iq "^[yY]" || exit 1;

@@ -219,6 +219,9 @@ func skipNamespace(name string) bool {
 // mutateHandler mounts in the volumes and adds the appropriate env vars to new pods
 func mutateHandler(w http.ResponseWriter, r *http.Request) {
 	ar := getAdmissionReview(w, r)
+	if ar == nil {
+		return
+	}
 
 	req := ar.Request
 	var pod corev1.Pod
@@ -354,6 +357,9 @@ func mutateHandler(w http.ResponseWriter, r *http.Request) {
 // serviceaccountHandler adds image pull secret to new service accounts
 func serviceaccountHandler(w http.ResponseWriter, r *http.Request) {
 	ar := getAdmissionReview(w, r)
+	if ar == nil {
+		return
+	}
 
 	req := ar.Request
 	var sa corev1.ServiceAccount
