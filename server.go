@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	gcr_config "github.com/GoogleCloudPlatform/docker-credential-gcr/config"
+	gcr_config "github.com/GoogleCloudPlatform/docker-credential-gcr/v2/config"
 	"github.com/blang/semver/v4"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
