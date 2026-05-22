@@ -281,6 +281,140 @@ func TestMutateHandler(t *testing.T) {
 			t.Errorf("patch should contain GOOGLE_APPLICATION_CREDENTIALS env var, got: %s", patchStr)
 		}
 	})
+
+	t.Run("empty containers list should be skipped without crash", func(t *testing.T) {
+		pod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{},
+			},
+		}
+		payload := createPodAdmissionReview(t, pod, "default")
+		req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(payload))
+		rec := httptest.NewRecorder()
+		mutateHandler(rec, req)
+
+		res := rec.Result()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("expected status 200, got %d", res.StatusCode)
+		}
+
+		var ar admissionv1.AdmissionReview
+		if err := json.NewDecoder(res.Body).Decode(&ar); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !ar.Response.Allowed {
+			t.Error("expected allowed to be true")
+		}
+		if len(ar.Response.Patch) > 0 && string(ar.Response.Patch) != "null" {
+			t.Errorf("expected no patches, got: %s", string(ar.Response.Patch))
+		}
+	})
+
+	t.Run("multi-container pod where one has creds already should only patch the other", func(t *testing.T) {
+		pod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name: "app-with-creds",
+						Env: []corev1.EnvVar{
+							{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: "/existing/path.json"},
+						},
+					},
+					{
+						Name: "app-without-creds",
+						Env:  []corev1.EnvVar{},
+					},
+				},
+			},
+		}
+		payload := createPodAdmissionReview(t, pod, "default")
+		req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(payload))
+		rec := httptest.NewRecorder()
+		mutateHandler(rec, req)
+
+		res := rec.Result()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("expected status 200, got %d", res.StatusCode)
+		}
+
+		var ar admissionv1.AdmissionReview
+		if err := json.NewDecoder(res.Body).Decode(&ar); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !ar.Response.Allowed {
+			t.Error("expected allowed to be true")
+		}
+		if len(ar.Response.Patch) == 0 {
+			t.Fatal("expected patch, got none")
+		}
+
+		patchStr := string(ar.Response.Patch)
+		if !strings.Contains(patchStr, "gcp-creds") {
+			t.Errorf("patch should contain gcp-creds volume, got: %s", patchStr)
+		}
+		if !strings.Contains(patchStr, "/spec/containers/1/env") || !strings.Contains(patchStr, "/spec/containers/1/volumeMounts") {
+			t.Errorf("patch should target index 1 container for env and volumeMount, got: %s", patchStr)
+		}
+		if strings.Contains(patchStr, "/spec/containers/0/env") || strings.Contains(patchStr, "/spec/containers/0/volumeMounts") {
+			t.Errorf("patch should NOT target index 0 container, got: %s", patchStr)
+		}
+	})
+
+	t.Run("init containers should also be mutated if they require credentials", func(t *testing.T) {
+		pod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-app",
+						Env:  []corev1.EnvVar{},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "main-app",
+						Env:  []corev1.EnvVar{},
+					},
+				},
+			},
+		}
+		payload := createPodAdmissionReview(t, pod, "default")
+		req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(payload))
+		rec := httptest.NewRecorder()
+		mutateHandler(rec, req)
+
+		res := rec.Result()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("expected status 200, got %d", res.StatusCode)
+		}
+
+		var ar admissionv1.AdmissionReview
+		if err := json.NewDecoder(res.Body).Decode(&ar); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !ar.Response.Allowed {
+			t.Error("expected allowed to be true")
+		}
+		if len(ar.Response.Patch) == 0 {
+			t.Fatal("expected patch, got none")
+		}
+
+		patchStr := string(ar.Response.Patch)
+		if !strings.Contains(patchStr, "/spec/initContainers/0/env") || !strings.Contains(patchStr, "/spec/initContainers/0/volumeMounts") {
+			t.Errorf("patch should target initContainers at index 0, got: %s", patchStr)
+		}
+	})
 }
 
 func TestServiceAccountHandler(t *testing.T) {
